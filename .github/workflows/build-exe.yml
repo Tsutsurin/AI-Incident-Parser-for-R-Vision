@@ -1,0 +1,47 @@
+
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build AI Incident Parser
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --onefile --console --paths . --name AI-Incident-Parser app/main_exe.py
+
+      - name: Prepare distribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release/config, release/input, release/output
+          Copy-Item dist/AI-Incident-Parser.exe release/
+          Copy-Item config/*.example.json release/config/
+          Set-Content -Path release/input/incident.txt -Value "Test incident" -Encoding UTF8
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Incident-Parser-Windows
+          path: release/
+          retention-days: 14
