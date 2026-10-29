@@ -1,4 +1,3 @@
-
 name: Build Windows EXE
 
 on:
@@ -6,40 +5,58 @@ on:
 
 jobs:
   build:
-    name: Build AI Incident Parser
+    name: Build Windows Executable
     runs-on: windows-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
 
       - name: Install dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install pyinstaller
+          python -m pip install pytest ruff pyinstaller
+
+      - name: Check code quality
+        shell: pwsh
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          python -m pytest -v
 
       - name: Build EXE
         shell: pwsh
         run: |
           python -m PyInstaller --clean --noconfirm --onefile --console --paths . --name AI-Incident-Parser app/main_exe.py
 
-      - name: Prepare distribution
+      - name: Prepare release
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release/config, release/input, release/output
+          New-Item -ItemType Directory -Force -Path release
+          New-Item -ItemType Directory -Force -Path release/config
+          New-Item -ItemType Directory -Force -Path release/input
+          New-Item -ItemType Directory -Force -Path release/output
+
           Copy-Item dist/AI-Incident-Parser.exe release/
           Copy-Item config/*.example.json release/config/
-          Set-Content -Path release/input/incident.txt -Value "Test incident" -Encoding UTF8
 
-      - name: Upload Windows build
+          Set-Content `
+            -Path release/input/incident.txt `
+            -Value "Test incident" `
+            -Encoding UTF8
+
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
           name: AI-Incident-Parser-Windows

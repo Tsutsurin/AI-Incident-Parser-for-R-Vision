@@ -1,7 +1,5 @@
+"""Windows EXE entry point for AI Incident Parser."""
 
-"""Entry point for the Windows EXE build of AI Incident Parser."""
-
-import logging
 import sys
 from pathlib import Path
 
@@ -9,7 +7,7 @@ from app import main as parser
 
 
 def get_app_root() -> Path:
-    """Return the executable directory or the project root."""
+    """Determine the directory containing application files."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
@@ -17,16 +15,9 @@ def get_app_root() -> Path:
 
 
 def main() -> int:
-    """Run the existing parser with paths relative to the EXE."""
+    """Run the incident parser with correct application paths."""
     parser.ROOT = get_app_root()
-
-    try:
-        return parser.main()
-    except Exception:
-        logging.getLogger("incident_parser").exception(
-            "Unexpected application error"
-        )
-        return 1
+    return parser.main()
 
 
 if __name__ == "__main__":
