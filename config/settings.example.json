@@ -1,0 +1,6 @@
+{
+  "base_url": "http://127.0.0.1:11434/v1",
+  "model": "qwen9B:latest",
+  "timeout": 120,
+  "max_retries": 2
+}
