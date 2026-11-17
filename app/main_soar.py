@@ -9,10 +9,9 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
-
-import httpx
-from pydantic import ValidationError
+import socket
+import urllib.error
+from typing import Any, Dict, List, Optional
 
 from app.main import call_llm, load_reference, make_messages, read_json, validate_result
 
@@ -21,7 +20,7 @@ LOGGER = logging.getLogger("incident_parser.soar")
 MAX_INCIDENT_LENGTH = 100_000
 
 
-def parse_incident(incident: str, config_dir: Path) -> dict[str, Any]:
+def parse_incident(incident: str, config_dir: Path) -> Dict[str, Any]:
     """Process one incident without writing any files."""
     incident = incident.strip()
     if not incident:
@@ -35,11 +34,11 @@ def parse_incident(incident: str, config_dir: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise TypeError("LLM result must be a JSON object")
     if raw.get("error"):
-        raise ValueError(f"LLM classification failed: {raw['error']}")
+        raise ValueError("LLM classification failed: {}".format(raw['error']))
     return validate_result(raw, refs).model_dump()
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     """Read incident input, emit one JSON result, and return an exit code."""
     argument_parser = argparse.ArgumentParser(
         description="AI Incident Parser for R-Vision SOAR"
@@ -72,8 +71,8 @@ def main(argv: list[str] | None = None) -> int:
         TypeError,
         KeyError,
         IndexError,
-        ValidationError,
-        httpx.HTTPError,
+        urllib.error.URLError,
+        socket.timeout,
     ) as exc:
         LOGGER.error("Incident processing failed: %s", exc)
         return 1
