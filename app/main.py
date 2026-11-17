@@ -172,8 +172,6 @@ def make_messages(
         "negative indicators in context, including negations, hypothetical "
         "language and uncertainty. Indicators are evidence cues, not exact "
         "substring matches or automatic classification triggers. "
-        "Do not classify an incident as confirmed malware solely because "
-        "legitimate system tools can also be used by attackers. "
         "Use the most specific supported category and incident type; "
         "otherwise choose the configured suspicion category if supported. "
         "If classification is ambiguous and cannot be supported, "
