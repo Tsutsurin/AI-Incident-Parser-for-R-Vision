@@ -59,13 +59,12 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
     try:
-        incident = (
-            sys.stdin.read(MAX_INCIDENT_LENGTH + 1)
-            if args.stdin
-            else args.incident
-        )
+        incident = sys.stdin.read(MAX_INCIDENT_LENGTH + 1) if args.stdin else args.incident
         result = parse_incident(incident, args.config)
-        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
+        print(
+            json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+            flush=True,
+        )
         return 0
     except (
         OSError,
