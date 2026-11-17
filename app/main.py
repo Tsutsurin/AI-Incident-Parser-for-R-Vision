@@ -4,25 +4,35 @@ import argparse
 import json
 import logging
 import os
+import socket
+import time
+import urllib.error
+import urllib.request
 import sys
 from pathlib import Path
-from typing import Any
-
-import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGGER = logging.getLogger("incident_parser")
 
 
-class IncidentResult(BaseModel):
-    """Validated incident classification and extracted data."""
+class IncidentResult(object):
+    """Validated incident data with the legacy public interface."""
 
-    model_config = ConfigDict(extra="forbid")
+    def __init__(self, category, incident_type, data):
+        self.category = category
+        self.incident_type = incident_type
+        self.data = data
 
-    category: str
-    incident_type: str
-    data: dict[str, list[str]] = Field(default_factory=dict)
+    def model_dump(self):
+        return {
+            "category": self.category,
+            "incident_type": self.incident_type,
+            "data": self.data,
+        }
+
+    def model_dump_json(self, indent=None):
+        return json.dumps(self.model_dump(), ensure_ascii=False, indent=indent)
 
 
 def read_json(path: Path) -> Any:
@@ -31,10 +41,10 @@ def read_json(path: Path) -> Any:
         return json.load(stream)
 
 
-def load_reference(config_dir: Path) -> dict[str, Any]:
+def load_reference(config_dir: Path) -> Dict[str, Any]:
     """Load and validate incident classification references."""
     refs = {
-        name: read_json(config_dir / f"{name}.json")
+        name: read_json(config_dir / "{}.json".format(name))
         for name in (
             "categories",
             "incident_types",
@@ -103,8 +113,8 @@ def load_reference(config_dir: Path) -> dict[str, Any]:
 
 def make_messages(
     incident: str,
-    refs: dict[str, Any],
-) -> list[dict[str, str]]:
+    refs: Dict[str, Any],
+) -> List[Dict[str, str]]:
     """Prepare classification instructions and incident data."""
     system = (
         "You are a security incident extraction engine. "
@@ -144,116 +154,99 @@ def make_messages(
     ]
 
 
-def call_llm(
-    settings: dict[str, Any],
-    messages: list[dict[str, str]],
-) -> Any:
-    """Send a prompt to Ollama using /api/generate."""
+def call_llm(settings, messages):
+    """Call the native Ollama API using Python's standard library."""
     base_url = str(settings["base_url"]).rstrip("/")
-
     if not base_url.startswith(("http://", "https://")):
         raise ValueError("base_url must be an HTTP(S) URL")
 
     prompt = "\n\n".join(
-        f"{message['role'].upper()}:\n{message['content']}" for message in messages
+        "{}:\n{}".format(message["role"].upper(), message["content"])
+        for message in messages
     )
-
     payload = {
         "model": settings["model"],
         "prompt": prompt,
         "stream": False,
         "format": "json",
-        "options": {
-            "temperature": 0,
-        },
+        "options": {"temperature": 0},
     }
-
     retries = int(settings.get("max_retries", 2))
     timeout = float(settings.get("timeout", 120))
-
     if retries < 0:
         raise ValueError("max_retries must be >= 0")
-
     if timeout <= 0:
         raise ValueError("timeout must be positive")
 
+    headers = {"Content-Type": "application/json"}
     key = os.getenv("LLM_API_KEY", "")
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    if key:
+        headers["Authorization"] = "Bearer {}".format(key)
 
-    # Set NO_PROXY for internal hosts when a corporate proxy
-    # is configured and must be bypassed.
-    with httpx.Client(timeout=timeout) as client:
-        for attempt in range(retries + 1):
-            try:
-                response = client.post(
-                    f"{base_url}/api/generate",
-                    json=payload,
-                    headers=headers,
-                )
-                response.raise_for_status()
-
-                response_data = response.json()
-                content = response_data["response"]
-
-                if not isinstance(content, str):
-                    raise TypeError("Ollama returned non-text response")
-
-                result = json.loads(content)
-
-                if not isinstance(result, dict):
-                    raise TypeError("Ollama response must be a JSON object")
-
-                return result
-
-            except (
-                httpx.TransportError,
-                httpx.HTTPStatusError,
-            ) as exc:
-                retryable = not isinstance(
-                    exc, httpx.HTTPStatusError
-                ) or exc.response.status_code in (429, 500, 502, 503, 504)
-
-                if attempt == retries or not retryable:
-                    raise
-
-                LOGGER.warning(
-                    "Ollama request failed (attempt %s/%s): %s",
-                    attempt + 1,
-                    retries + 1,
-                    exc,
-                )
-
+    # Bypass environment proxies for the internal Ollama server.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(
+        base_url + "/api/generate",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    for attempt in range(retries + 1):
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+            content = response_data["response"]
+            if not isinstance(content, str):
+                raise TypeError("Ollama returned non-text response")
+            result = json.loads(content)
+            if not isinstance(result, dict):
+                raise TypeError("Ollama response must be a JSON object")
+            return result
+        except (urllib.error.URLError, socket.timeout) as exc:
+            status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+            retryable = status is None or status in (429, 500, 502, 503, 504)
+            if attempt == retries or not retryable:
+                raise
+            LOGGER.warning(
+                "Ollama request failed (attempt %s/%s): %s",
+                attempt + 1, retries + 1, exc,
+            )
     raise RuntimeError("Ollama request failed")
 
 
 def validate_result(
     raw: Any,
-    refs: dict[str, Any],
+    refs: Dict[str, Any],
 ) -> IncidentResult:
     """Validate model output against configured references."""
-    result = IncidentResult.model_validate(raw)
-
-    if result.category not in refs["categories"]:
-        raise ValueError(f"Unknown category: {result.category}")
-
-    if result.incident_type not in (refs["incident_types"][result.category]):
-        raise ValueError(f"Unknown incident type: {result.incident_type}")
-
-    unknown = set(result.data) - set(refs["data_fields"])
-
+    if not isinstance(raw, dict):
+        raise ValueError("Result must be a JSON object")
+    if set(raw) != {"category", "incident_type", "data"}:
+        raise ValueError("Result must contain only category, incident_type and data")
+    category = raw["category"]
+    incident_type = raw["incident_type"]
+    data = raw["data"]
+    if not isinstance(category, str) or not isinstance(incident_type, str):
+        raise ValueError("Category and incident type must be strings")
+    if not isinstance(data, dict):
+        raise ValueError("Data must be an object")
+    if category not in refs["categories"]:
+        raise ValueError("Unknown category: {}".format(category))
+    if incident_type not in refs["incident_types"][category]:
+        raise ValueError("Unknown incident type: {}".format(incident_type))
+    unknown = set(data) - set(refs["data_fields"])
     if unknown:
-        raise ValueError(f"Unknown data fields: {sorted(unknown)}")
-
-    for field, values in result.data.items():
-        if not all(isinstance(value, str) and value.strip() for value in values):
-            raise ValueError(f"Invalid values for field: {field}")
-
+        raise ValueError("Unknown data fields: {}".format(sorted(unknown)))
+    for field, values in data.items():
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) and value.strip() for value in values
+        ):
+            raise ValueError("Invalid values for field: {}".format(field))
     normalized_data = {
-        name: list(dict.fromkeys(result.data.get(name, [])))
+        name: list(dict.fromkeys(data.get(name, [])))
         for name in refs["data_fields"]
     }
-
-    return result.model_copy(update={"data": normalized_data})
+    return IncidentResult(category, incident_type, normalized_data)
 
 
 def main() -> int:
@@ -307,7 +300,7 @@ def main() -> int:
         raw = call_llm(settings, messages)
 
         if raw.get("error"):
-            raise ValueError(f"LLM could not classify incident: {raw['error']}")
+            raise ValueError("LLM could not classify incident: {}".format(raw['error']))
 
         result = validate_result(raw, refs)
 
@@ -344,8 +337,8 @@ def main() -> int:
         KeyError,
         IndexError,
         TypeError,
-        ValidationError,
-        httpx.HTTPError,
+        urllib.error.URLError,
+        socket.timeout,
     ) as exc:
         LOGGER.error("Parsing failed: %s", exc)
         return 1
