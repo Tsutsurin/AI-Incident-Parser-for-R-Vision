@@ -34,7 +34,7 @@ def test_argument_returns_json(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"incident": "test incident"}
 
 
-def test_error_writes_no_stdout(monkeypatch, capsys):
+def test_error_writes_no_stdout(monkeypatch, capsys, caplog):
     def fail(incident, config_dir):
         raise ValueError("Invalid incident")
 
@@ -42,4 +42,4 @@ def test_error_writes_no_stdout(monkeypatch, capsys):
     assert main_soar.main(["--incident", "bad"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Invalid incident" in captured.err
+    assert "Invalid incident" in caplog.text
