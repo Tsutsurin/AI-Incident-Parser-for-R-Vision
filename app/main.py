@@ -160,8 +160,8 @@ def call_llm(settings, messages):
     if not base_url.startswith(("http://", "https://")):
         raise ValueError("base_url must be an HTTP(S) URL")
 
-    prompt = "\\n\\n".join(
-        "{}:\\n{}".format(message["role"].upper(), message["content"])
+    prompt = "\n\n".join(
+        "{}:\n{}".format(message["role"].upper(), message["content"])
         for message in messages
     )
     payload = {
