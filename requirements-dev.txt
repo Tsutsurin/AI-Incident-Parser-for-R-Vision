@@ -1,2 +1,0 @@
-pytest>=6.2,<7.1; python_version < '3.7'
-pytest>=7.0; python_version >= '3.7'
