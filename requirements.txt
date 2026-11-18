@@ -1,2 +1,0 @@
-# Runtime dependencies: Python 3.6.8 standard library only.
-# No pip install required for production SOAR execution.
