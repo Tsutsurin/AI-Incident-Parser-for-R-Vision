@@ -7,6 +7,7 @@ exactly one JSON object to stdout; errors go to stderr.
 import argparse
 import json
 import logging
+import signal
 import sys
 from pathlib import Path
 import socket
@@ -21,6 +22,10 @@ LOGGER = logging.getLogger("incident_parser.soar")
 MAX_INCIDENT_LENGTH = 100_000
 
 
+def _deadline_expired(signum, frame):
+    raise TimeoutError("Incident processing exceeded configured max_duration")
+
+
 def parse_incident(incident: str, config_dir: Path) -> Dict[str, Any]:
     """Process one incident without writing any files."""
     incident = incident.strip()
@@ -31,7 +36,17 @@ def parse_incident(incident: str, config_dir: Path) -> Dict[str, Any]:
 
     settings = read_json(config_dir / "settings.json")
     refs = load_reference(config_dir)
-    raw = call_llm(settings, make_messages(compact_incident(incident, settings), refs))
+    max_duration = float(settings.get("max_duration", 300))
+    if max_duration <= 0:
+        raise ValueError("max_duration must be positive")
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _deadline_expired)
+    signal.setitimer(signal.ITIMER_REAL, max_duration)
+    try:
+        raw = call_llm(settings, make_messages(compact_incident(incident, settings), refs))
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
     if not isinstance(raw, dict):
         raise TypeError("LLM result must be a JSON object")
     if raw.get("error"):
