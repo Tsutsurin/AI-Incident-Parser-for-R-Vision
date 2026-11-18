@@ -189,7 +189,7 @@ def compact_incident(incident, settings):
         if count > 1:
             output.append("[Repeated event description: {} occurrences; "
                           "event timestamps differ]".format(count))
-    return "\\n\\n".join(output)
+    return "\n\n".join(output)
 
 
 def make_messages(
