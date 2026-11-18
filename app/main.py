@@ -155,7 +155,7 @@ def compact_incident(incident, settings):
     # Split only on explicit incident-update headers. A unique block is
     # always retained; timestamps from repeated identical blocks are summarized.
     parts = re.split(
-        r"(?im)^\\s*Обновление информации по инциденту[^\\n]*\\n?",
+        r"(?im)^\s*Обновление информации по инциденту[^\n]*\n?",
         incident,
     )
     if len(parts) < 2:
@@ -168,10 +168,10 @@ def compact_incident(incident, settings):
             continue
         # Event timestamps vary while the event details remain identical.
         match = re.match(
-            r"(?is)^((?:\\d{1,2}\\s+[A-Za-z]+\\s+\\d{4},?\\s+"
-            r"\\d{1,2}:\\d{2}(?::\\d{2})?\\s*(?:UTC)?)"
-            r"|(?:\\d{2}\\.\\d{2}\\.\\d{4}\\s+\\d{2}:\\d{2}:\\d{2}))"
-            r"\\s+(.*)$",
+            r"(?is)^((?:\d{1,2}\s+[A-Za-z]+\s+\d{4},?\s+"
+            r"\d{1,2}:\d{2}(?::\d{2})?\s*(?:UTC)?)"
+            r"|(?:\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2}))"
+            r"\s+(.*)$",
             part,
         )
         key = match.group(2).strip() if match else part
