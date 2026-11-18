@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -144,6 +145,53 @@ def load_reference(config_dir: Path) -> Dict[str, Any]:
     return refs
 
 
+def compact_incident(incident, settings):
+    """Collapse repeated update blocks without discarding distinct event bodies."""
+    cfg = settings.get("preprocessing", {})
+    if not isinstance(cfg, dict):
+        raise ValueError("preprocessing must be an object")
+    if cfg.get("deduplicate_updates", True) is False:
+        return incident
+    # Split only on explicit incident-update headers. A unique block is
+    # always retained; timestamps from repeated identical blocks are summarized.
+    parts = re.split(
+        r"(?im)^\s*Обновление информации по инциденту[^\n]*\n?",
+        incident,
+    )
+    if len(parts) < 2:
+        return incident
+    counts = {}
+    ordered = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        # Event timestamps vary while the event details remain identical.
+        match = re.match(
+            r"(?is)^((?:\d{1,2}\s+[A-Za-z]+\s+\d{4},?\s+"
+            r"\d{1,2}:\d{2}(?::\d{2})?\s*(?:UTC)?)"
+            r"|(?:\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2}))"
+            r"\s+(.*)$",
+            part,
+        )
+        key = match.group(2).strip() if match else part
+        if key not in counts:
+            counts[key] = [1, part]
+            ordered.append(key)
+        else:
+            counts[key][0] += 1
+    if not any(counts[key][0] > 1 for key in ordered):
+        return incident
+    output = []
+    for key in ordered:
+        count, original = counts[key]
+        output.append(original)
+        if count > 1:
+            output.append("[Repeated event description: {} occurrences; "
+                          "event timestamps differ]".format(count))
+    return "\n\n".join(output)
+
+
 def make_messages(
     incident: str,
     refs: Dict[str, Any],
@@ -203,15 +251,24 @@ def call_llm(settings, messages):
         "{}:\n{}".format(message["role"].upper(), message["content"])
         for message in messages
     )
+    options = {"temperature": 0}
+    if "num_predict" in settings:
+        options["num_predict"] = int(settings["num_predict"])
+        if options["num_predict"] <= 0:
+            raise ValueError("num_predict must be positive")
     payload = {
         "model": settings["model"],
         "prompt": prompt,
         "stream": False,
         "format": "json",
-        "options": {"temperature": 0},
+        "options": options,
     }
     retries = int(settings.get("max_retries", 2))
     timeout = float(settings.get("timeout", 120))
+    max_duration = float(settings.get("max_duration", 300))
+    if max_duration <= 0:
+        raise ValueError("max_duration must be positive")
+    deadline = time.monotonic() + max_duration
     if retries < 0:
         raise ValueError("max_retries must be >= 0")
     if timeout <= 0:
@@ -231,8 +288,11 @@ def call_llm(settings, messages):
         method="POST",
     )
     for attempt in range(retries + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("LLM overall deadline exceeded")
         try:
-            with opener.open(request, timeout=timeout) as response:
+            with opener.open(request, timeout=min(timeout, remaining)) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
             content = response_data["response"]
             if not isinstance(content, str):
@@ -244,7 +304,7 @@ def call_llm(settings, messages):
         except (urllib.error.URLError, socket.timeout) as exc:
             status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
             retryable = status is None or status in (429, 500, 502, 503, 504)
-            if attempt == retries or not retryable:
+            if attempt == retries or not retryable or time.monotonic() >= deadline:
                 raise
             LOGGER.warning(
                 "Ollama request failed (attempt %s/%s): %s",
@@ -335,7 +395,7 @@ def main() -> int:
         LOGGER.info("Incident loaded")
         LOGGER.info("Sending request to Ollama")
 
-        messages = make_messages(incident, refs)
+        messages = make_messages(compact_incident(incident, settings), refs)
         raw = call_llm(settings, messages)
 
         if raw.get("error"):
