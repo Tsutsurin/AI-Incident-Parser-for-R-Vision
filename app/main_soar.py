@@ -13,7 +13,8 @@ import socket
 import urllib.error
 from typing import Any, Dict, List, Optional
 
-from app.main import call_llm, load_reference, make_messages, read_json, validate_result
+from app.main import (call_llm, compact_incident, load_reference,
+                      make_messages, read_json, validate_result)
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGGER = logging.getLogger("incident_parser.soar")
@@ -30,7 +31,7 @@ def parse_incident(incident: str, config_dir: Path) -> Dict[str, Any]:
 
     settings = read_json(config_dir / "settings.json")
     refs = load_reference(config_dir)
-    raw = call_llm(settings, make_messages(incident, refs))
+    raw = call_llm(settings, make_messages(compact_incident(incident, settings), refs))
     if not isinstance(raw, dict):
         raise TypeError("LLM result must be a JSON object")
     if raw.get("error"):
@@ -73,6 +74,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         IndexError,
         urllib.error.URLError,
         socket.timeout,
+        TimeoutError,
     ) as exc:
         LOGGER.error("Incident processing failed: %s", exc)
         return 1
