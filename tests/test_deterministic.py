@@ -17,6 +17,20 @@ class DeterministicTests(unittest.TestCase):
         self.assertEqual(result['data']['src.username'], ['PC01\\Администратор'])
         self.assertEqual(result['data']['dst.ip'], ['10.10.10.20'])
 
+    def test_credential_manager(self):
+        text = ('24 Nov 2026, 11:12:48 UTC на хосте 10.10.10.20 - '
+                'vnp0142.corp.com обнаружено использование встроенных утилит '
+                'Windows для получения информации о хранящихся в Credential Manager учетных данных.\n'
+                'Выполненная команда:\n'
+                'rundll32.exe keymgr.dll,KRShowKeyMgr\n'
+                'УЗ — инициатор активности: corp\\ivanov.\n'
+                'Эта активность может указывать на легитимные действия.')
+        result, _ = parse(text, CONFIG)
+        self.assertEqual(result['data']['dst.hostname'], ['vnp0142'])
+        self.assertEqual(result['data']['dst.ip'], ['10.10.10.20'])
+        self.assertEqual(result['data']['username'], ['ivanov'])
+        self.assertEqual(result['category'], 'Событие безопасности')
+
     def test_glued(self):
         result, _ = parse('УЗ-инициатор активности: rootЦелевой хост:10.1.2.3server.corp.com', CONFIG)
         self.assertEqual(result['data']['src.username'], ['root'])
