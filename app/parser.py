@@ -64,11 +64,13 @@ def parse(text, directory):
                 if role == 'src':
                     source_ips.append(addr)
             value = IP.sub(' ', value)
+            value = re.sub(r'(?i)\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b', ' ', value)
             value = re.sub(r'\([^)]*\)', ' ', value)
             value = re.sub(r'(?i)\bMAC\s*:.*', '', value)
             for token in re.split(r'[\s,;…]+', value):
                 token = token.strip('().:[]"')
-                if not HOST.fullmatch(token) or not any(c.isalpha() for c in token):
+                if (not HOST.fullmatch(token) or not any(c.isalpha() for c in token)
+                        or re.fullmatch(r'[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}', token)):
                     continue
                 if role == 'src':
                     source_names.append(token)
