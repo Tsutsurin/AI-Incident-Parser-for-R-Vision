@@ -1,0 +1,7 @@
+{
+  "controlled_networks": [],
+  "controlled_domains": [],
+  "complete_inventory": false,
+  "inside_type": "Атака внутри контролируемой зоны",
+  "outside_type": "Атака из-за пределов контролируемой зоны"
+}
