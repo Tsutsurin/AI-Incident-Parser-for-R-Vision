@@ -38,5 +38,6 @@
       "field": "username",
       "pattern": "пользователь УЗ\\s*:\\s*([^\\n]+)"
     }
-  ]
+  ],
+  "host_boundary": "[А-Яа-яЁё]"
 }

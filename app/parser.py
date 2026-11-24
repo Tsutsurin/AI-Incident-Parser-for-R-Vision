@@ -55,6 +55,10 @@ def parse(text, directory):
             return
         if field.endswith('.host'):
             role = field.split('.')[0]
+            # Stop at narrative text before scanning for either IPs or hosts.
+            # Cyrillic prose cannot be part of the supported ASCII host syntax.
+            boundary = patterns.get('host_boundary', r'[А-Яа-яЁё]')
+            value = re.split(boundary, value, maxsplit=1, flags=re.I)[0]
             for match in IP.finditer(value):
                 try:
                     addr = str(ipaddress.ip_address(match.group()))
