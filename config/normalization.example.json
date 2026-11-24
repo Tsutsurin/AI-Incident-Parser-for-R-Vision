@@ -1,0 +1,9 @@
+{
+  "corporate_domains": [
+    "corp",
+    "corp.com"
+  ],
+  "include_unknown": true,
+  "short_name": true,
+  "lowercase": true
+}

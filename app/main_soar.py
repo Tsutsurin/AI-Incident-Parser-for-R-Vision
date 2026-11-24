@@ -14,16 +14,21 @@ import socket
 import urllib.error
 from typing import Any, Dict, List, Optional
 
-from app.main import (call_llm, compact_incident, load_reference,
-                      make_messages, read_json, validate_result)
+from app.main import call_llm, make_messages, read_json, validate_result
+from app.parser import parse
+import time
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGGER = logging.getLogger("incident_parser.soar")
 MAX_INCIDENT_LENGTH = 100_000
 
 
+class VerificationDeadline(Exception):
+    pass
+
+
 def _deadline_expired(signum, frame):
-    raise TimeoutError("Incident processing exceeded configured max_duration")
+    raise VerificationDeadline("LLM verification deadline exceeded")
 
 
 def parse_incident(incident: str, config_dir: Path) -> Dict[str, Any]:
@@ -34,24 +39,33 @@ def parse_incident(incident: str, config_dir: Path) -> Dict[str, Any]:
     if len(incident) > MAX_INCIDENT_LENGTH:
         raise ValueError("Incident text exceeds maximum length")
 
+    started = time.monotonic()
     settings = read_json(config_dir / "settings.json")
-    refs = load_reference(config_dir)
-    max_duration = float(settings.get("max_duration", 300))
-    if max_duration <= 0:
-        raise ValueError("max_duration must be positive")
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    signal.signal(signal.SIGALRM, _deadline_expired)
-    signal.setitimer(signal.ITIMER_REAL, max_duration)
-    try:
-        raw = call_llm(settings, make_messages(compact_incident(incident, settings), refs))
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-    if not isinstance(raw, dict):
-        raise TypeError("LLM result must be a JSON object")
-    if raw.get("error"):
-        raise ValueError("LLM classification failed: {}".format(raw['error']))
-    return validate_result(raw, refs).model_dump()
+    result, refs = parse(incident, config_dir)
+    verification = settings.get("llm_verification", {})
+    if verification.get("enabled", False):
+        try:
+            budget = min(5.0, float(verification.get("timeout", 3)))
+            if budget <= 0:
+                raise ValueError("Invalid verification timeout")
+            options = dict(settings, timeout=budget, max_duration=budget,
+                           max_retries=0, num_predict=256)
+            previous_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _deadline_expired)
+            try:
+                signal.setitimer(signal.ITIMER_REAL, budget)
+                raw = call_llm(options, make_messages(incident, refs))
+                checked = validate_result(raw, refs).model_dump()
+                # Verification is advisory: never replace deterministic facts.
+                LOGGER.info("LLM verification agreement: %s", checked == result)
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, previous_handler)
+        except Exception as exc:
+            LOGGER.warning("LLM verification skipped: %s", type(exc).__name__)
+    LOGGER.info("Processing time: %.3fs", time.monotonic() - started)
+    return result
+
 
 
 def main(argv: Optional[List[str]] = None) -> int:

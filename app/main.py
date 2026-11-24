@@ -383,25 +383,11 @@ def main() -> int:
     )
 
     try:
-        settings = read_json(args.config / "settings.json")
-
-        refs = load_reference(args.config)
+        from app.main_soar import parse_incident
 
         incident = args.input.read_text(encoding="utf-8-sig").strip()
-
-        if not incident:
-            raise ValueError("Incident text is empty")
-
-        LOGGER.info("Incident loaded")
-        LOGGER.info("Sending request to Ollama")
-
-        messages = make_messages(compact_incident(incident, settings), refs)
-        raw = call_llm(settings, messages)
-
-        if raw.get("error"):
-            raise ValueError("LLM could not classify incident: {}".format(raw['error']))
-
-        result = validate_result(raw, refs)
+        raw = parse_incident(incident, args.config)
+        result = IncidentResult(raw["category"], raw["incident_type"], raw["data"])
 
         args.output.parent.mkdir(
             parents=True,
